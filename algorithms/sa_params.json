@@ -1,0 +1,10 @@
+{
+  "scale": 100.0,
+  "initial_temp": 10.0,
+  "final_temp": 0.01,
+  "cooling": "exponential",
+  "cooling_rate": null,
+  "iters_per_city": 150,
+  "min_iters": 5000,
+  "n_runs": 1
+}
