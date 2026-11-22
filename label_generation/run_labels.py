@@ -16,11 +16,12 @@ import time
 import pandas as pd
 from joblib import Parallel, delayed
 
-from tsp_utils import load_instance, seed_from_id, DATA_DIR
+from tsp_utils import load_instance, seed_from_id, DATA_DIR, dist_matrix, tour_cost, is_valid_tour
 
 OUT_DIR = 'data/labeled'
 PRIORITY = ['2opt_hill_climbing', 'mst_2opt', 'sa_2opt']  # orden de desempate
 TOL = 1e-9
+COST_ORDER = ['2opt_hill_climbing', 'sa_2opt', 'mst_2opt']  # orden de columnas cost_* del enunciado
 
 
 def get_algos(use_stub, tarea2_dir=None):
@@ -30,7 +31,11 @@ def get_algos(use_stub, tarea2_dir=None):
     if use_stub:
         from label_generation.stubs import StubHC, StubSA, StubMST
         return {'2opt_hill_climbing': StubHC, 'sa_2opt': StubSA, 'mst_2opt': StubMST}
-    from algorithms import hill_climbing_2opt, sa_2opt, mst_2opt
+    try:
+        from algorithms import hill_climbing_2opt, sa_2opt, mst_2opt
+    except ImportError as e:
+        raise SystemExit(f'No se pudo importar el paquete algorithms ({e}).\n'
+                         'Si P1/P2 aún no lo suben, usa --tarea2 RUTA con los archivos de la Tarea 2.')
     return {'2opt_hill_climbing': hill_climbing_2opt, 'sa_2opt': sa_2opt, 'mst_2opt': mst_2opt}
 
 
@@ -38,21 +43,29 @@ def cache_path(name, tag):
     return f'{OUT_DIR}/cache_{name}{tag}.csv'
 
 
-def run_one(algo, instance_id):
+def run_one(algo, instance_id, validate=True):
     coords = load_instance(instance_id)
     t0 = time.perf_counter()
-    _, cost = algo.solve(coords, seed=seed_from_id(instance_id))
-    return {'instance_id': instance_id, 'cost': float(cost),
-            'seconds': time.perf_counter() - t0}
+    tour, cost = algo.solve(coords, seed=seed_from_id(instance_id))
+    seconds = time.perf_counter() - t0
+    if validate:  # el costo que se guarda es SIEMPRE el recalculado sobre el tour devuelto
+        tour = [int(v) for v in tour]
+        if not is_valid_tour(tour, len(coords)):
+            raise ValueError(f'{instance_id}: el tour devuelto no es una permutación válida')
+        real = tour_cost(tour, dist_matrix(coords))
+        if abs(real - cost) > 1e-6 * max(1.0, real):
+            raise ValueError(f'{instance_id}: costo reportado {cost} != costo del tour {real}')
+        cost = real
+    return {'instance_id': instance_id, 'cost': float(cost), 'seconds': seconds}
 
 
-def run_algorithm(name, algo, ids, n_jobs, tag):
+def run_algorithm(name, algo, ids, n_jobs, tag, validate=True):
     path = cache_path(name, tag)
     if os.path.exists(path):
         print(f'[{name}] caché encontrado, se reutiliza: {path}')
         return pd.read_csv(path)
     print(f'[{name}] corriendo {len(ids)} instancias...')
-    rows = Parallel(n_jobs=n_jobs)(delayed(run_one)(algo, i) for i in ids)
+    rows = Parallel(n_jobs=n_jobs)(delayed(run_one)(algo, i, validate) for i in ids)
     df = pd.DataFrame(rows)
     df.to_csv(path, index=False)  # se escribe al terminar: un caché existente siempre está completo
     return df
@@ -67,7 +80,8 @@ def pick_best(costs):
 
 def label(split_df, caches):
     df = split_df.copy()
-    for name, cdf in caches.items():
+    for name in COST_ORDER:  # mismo orden de columnas que pide el enunciado
+        cdf = caches[name]
         df = df.merge(cdf[['instance_id', 'cost']].rename(columns={'cost': f'cost_{name}'}),
                       on='instance_id', how='left', validate='one_to_one')
     res = [pick_best({a: r[f'cost_{a}'] for a in PRIORITY}) for _, r in df.iterrows()]
@@ -96,7 +110,7 @@ if __name__ == '__main__':
     for name, algo in get_algos(args.stub, args.tarea2).items():
         if args.only and name not in args.only:
             continue
-        df = run_algorithm(name, algo, ids, args.n_jobs, tag)
+        df = run_algorithm(name, algo, ids, args.n_jobs, tag, validate=not args.stub)
         print(f'[{name}] total {df["seconds"].sum():.1f}s de CPU, máx por instancia {df["seconds"].max():.2f}s')
 
     if args.limit:

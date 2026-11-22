@@ -2,6 +2,7 @@
     python -m label_generation.pattern_analysis [--tag _stub]
 Escribe tablas en data/labeled/ y figuras en report/."""
 import argparse
+import os
 
 import matplotlib
 matplotlib.use('Agg')
@@ -15,6 +16,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--tag', default='')
 tag = ap.parse_args().tag
 FIG = 'report'
+os.makedirs(FIG, exist_ok=True)
 DISTS = ['uniform', 'clustered', 'border']
 
 df = pd.concat([pd.read_csv(f'{OUT_DIR}/train_labeled{tag}.csv'),
