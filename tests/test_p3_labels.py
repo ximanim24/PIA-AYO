@@ -20,3 +20,31 @@ def test_label_adds_columns_and_keeps_originals():
     out = label(split, caches)
     assert list(out['best_algorithm']) == ['2opt_hill_climbing', 'sa_2opt']
     assert list(out['n_tied']) == [2, 1] and list(out['n']) == [5, 10]
+
+
+def test_label_column_order_matches_assignment():
+    split = pd.DataFrame({'instance_id': ['a'], 'n': [5]})
+    mk = lambda v: pd.DataFrame({'instance_id': ['a'], 'cost': v, 'seconds': 0.1})
+    out = label(split, {'2opt_hill_climbing': mk([1.0]), 'mst_2opt': mk([2.0]), 'sa_2opt': mk([3.0])})
+    assert list(out.columns) == ['instance_id', 'n', 'cost_2opt_hill_climbing', 'cost_sa_2opt', 'cost_mst_2opt',
+                                 'best_algorithm', 'n_tied']
+
+
+def test_run_one_rejects_inconsistent_cost_or_invalid_tour():
+    import pytest
+    from label_generation.run_labels import run_one
+
+    class BadCost:
+        @staticmethod
+        def solve(coords, seed=0):
+            return list(range(len(coords))), 0.0  # costo falso
+
+    class BadTour:
+        @staticmethod
+        def solve(coords, seed=0):
+            return [0] * len(coords), 1.0  # no es permutación
+
+    with pytest.raises(ValueError):
+        run_one(BadCost, 'inst_0007')
+    with pytest.raises(ValueError):
+        run_one(BadTour, 'inst_0007')
